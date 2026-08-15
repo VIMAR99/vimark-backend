@@ -1,105 +1,564 @@
-const express=require("express");
-const cors=require("cors");
-const Database=require("better-sqlite3");
-const jwt=require("jsonwebtoken");
-const crypto=require("crypto");
+const express = require("express");
+const cors = require("cors");
+const Database = require("better-sqlite3");
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
-const app=express(), db=new Database("vimark.db");
-const PORT=process.env.PORT||3000;
-const SECRET=process.env.JWT_SECRET||"CHANGE_ME_IN_PRODUCTION";
-app.use(cors()); app.use(express.json());
+const app = express();
+const db = new Database("vimark.db");
+
+const PORT = process.env.PORT || 3000;
+const SECRET = process.env.JWT_SECRET || "CHANGE_ME_IN_PRODUCTION";
+
+app.use(cors());
+app.use(express.json());
+
 db.pragma("journal_mode=WAL");
 
-db.exec(  CREATE TABLE IF NOT EXISTS users(   id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,phone TEXT UNIQUE,email TEXT UNIQUE,   password_hash TEXT NOT NULL,role TEXT NOT NULL DEFAULT 'student',created_at TEXT DEFAULT CURRENT_TIMESTAMP);   CREATE TABLE IF NOT EXISTS businesses(   id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,name TEXT NOT NULL,   description TEXT DEFAULT '',location TEXT DEFAULT '',verified INTEGER DEFAULT 0);   CREATE TABLE IF NOT EXISTS products(   id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,name TEXT NOT NULL,   description TEXT DEFAULT '',price INTEGER NOT NULL,image_url TEXT DEFAULT '',stock INTEGER DEFAULT 0,   created_at TEXT DEFAULT CURRENT_TIMESTAMP);   CREATE TABLE IF NOT EXISTS courses(   id INTEGER PRIMARY KEY AUTOINCREMENT,title TEXT NOT NULL,subject TEXT NOT NULL,level TEXT NOT NULL,   description TEXT DEFAULT '',is_premium INTEGER DEFAULT 0);   CREATE TABLE IF NOT EXISTS subscriptions(   id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,plan TEXT NOT NULL,   status TEXT DEFAULT 'active',amount INTEGER NOT NULL,started_at TEXT DEFAULT CURRENT_TIMESTAMP,expires_at TEXT);  );
+db.exec(`
+CREATE TABLE IF NOT EXISTS users(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  phone TEXT UNIQUE,
+  email TEXT UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'student',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
-const hash=p=>crypto.createHash("sha256").update(p).digest("hex");
-const token=u=>jwt.sign({id:u.id,role:u.role,name:u.name},SECRET,{expiresIn:"7d"});
-function auth(req,res,next){
-const h=req.headers.authorization||"",t=h.startsWith("Bearer ")?h.slice(7):null;
-if(!t)return res.status(401).json({error:"Authentification requise"});
-try{req.user=jwt.verify(t,SECRET);next()}catch(e){res.status(401).json({error:"Token invalide ou expiré"})}
+CREATE TABLE IF NOT EXISTS businesses(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  location TEXT DEFAULT '',
+  verified INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS products(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  business_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  price INTEGER NOT NULL,
+  image_url TEXT DEFAULT '',
+  stock INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS courses(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  level TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  is_premium INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS subscriptions(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  plan TEXT NOT NULL,
+  status TEXT DEFAULT 'active',
+  amount INTEGER NOT NULL,
+  started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT
+);
+`);
+
+const hash = (password) =>
+  crypto.createHash("sha256").update(password).digest("hex");
+
+const token = (user) =>
+  jwt.sign(
+    {
+      id: user.id,
+      role: user.role,
+      name: user.name
+    },
+    SECRET,
+    {
+      expiresIn: "7d"
+    }
+  );
+
+function auth(req, res, next) {
+  const header = req.headers.authorization || "";
+  const t = header.startsWith("Bearer ")
+    ? header.slice(7)
+    : null;
+
+  if (!t) {
+    return res.status(401).json({
+      error: "Authentification requise"
+    });
+  }
+
+  try {
+    req.user = jwt.verify(t, SECRET);
+    next();
+  } catch (e) {
+    return res.status(401).json({
+      error: "Token invalide ou expiré"
+    });
+  }
 }
 
-app.get("/api/health",(req,res)=>res.json({ok:true,service:"VIMARK API",version:"0.1.0"}));
+/* =========================
+   HEALTH
+========================= */
 
-app.post("/api/auth/register",(req,res)=>{
-const {name,phone,email,password,role="student"}=req.body;
-if(!name||!password)return res.status(400).json({error:"Nom et mot de passe requis"});
-if(!["student","merchant","teacher"].includes(role))return res.status(400).json({error:"Rôle invalide"});
-try{
-const r=db.prepare("INSERT INTO users(name,phone,email,password_hash,role) VALUES(?,?,?,?,?)")
-.run(name,phone||null,email||null,hash(password),role);
-const u=db.prepare("SELECT id,name,phone,email,role FROM users WHERE id=?").get(r.lastInsertRowid);
-res.status(201).json({user:u,token:token(u)});
-}catch(e){res.status(409).json({error:"Téléphone ou e-mail déjà utilisé"})}
+app.get("/api/health", (req, res) => {
+  res.json({
+    ok: true,
+    service: "VIMARK API",
+    version: "0.1.0"
+  });
 });
 
-app.post("/api/auth/login",(req,res)=>{
-const {identifier,password}=req.body;
-const u=db.prepare("SELECT * FROM users WHERE phone=? OR email=?").get(identifier,identifier);
-if(!u||u.password_hash!==hash(password||""))return res.status(401).json({error:"Identifiants incorrects"});
-const safe={id:u.id,name:u.name,phone:u.phone,email:u.email,role:u.role};
-res.json({user:safe,token:token(safe)});
+/* =========================
+   AUTH - REGISTER
+========================= */
+
+app.post("/api/auth/register", (req, res) => {
+  const {
+    name,
+    phone,
+    email,
+    password,
+    role = "student"
+  } = req.body;
+
+  if (!name || !password) {
+    return res.status(400).json({
+      error: "Nom et mot de passe requis"
+    });
+  }
+
+  if (!["student", "merchant", "teacher"].includes(role)) {
+    return res.status(400).json({
+      error: "Rôle invalide"
+    });
+  }
+
+  try {
+    const r = db
+      .prepare(`
+        INSERT INTO users(
+          name,
+          phone,
+          email,
+          password_hash,
+          role
+        )
+        VALUES(?,?,?,?,?)
+      `)
+      .run(
+        name,
+        phone || null,
+        email || null,
+        hash(password),
+        role
+      );
+
+    const u = db
+      .prepare(`
+        SELECT id,name,phone,email,role
+        FROM users
+        WHERE id=?
+      `)
+      .get(r.lastInsertRowid);
+
+    res.status(201).json({
+      user: u,
+      token: token(u)
+    });
+  } catch (e) {
+    res.status(409).json({
+      error: "Téléphone ou e-mail déjà utilisé"
+    });
+  }
 });
 
-app.get("/api/me",auth,(req,res)=>res.json(
-db.prepare("SELECT id,name,phone,email,role,created_at FROM users WHERE id=?").get(req.user.id)
-));
+/* =========================
+   AUTH - LOGIN
+========================= */
 
-app.get("/api/courses",(req,res)=>{
-let sql="SELECT * FROM courses WHERE 1=1",p=[];
-if(req.query.subject){sql+=" AND subject=?";p.push(req.query.subject)}
-if(req.query.level){sql+=" AND level=?";p.push(req.query.level)}
-res.json(db.prepare(sql+" ORDER BY id DESC").all(...p));
+app.post("/api/auth/login", (req, res) => {
+  const {
+    identifier,
+    password
+  } = req.body;
+
+  const u = db
+    .prepare(`
+      SELECT *
+      FROM users
+      WHERE phone=? OR email=?
+    `)
+    .get(identifier, identifier);
+
+  if (!u || u.password_hash !== hash(password || "")) {
+    return res.status(401).json({
+      error: "Identifiants incorrects"
+    });
+  }
+
+  const safe = {
+    id: u.id,
+    name: u.name,
+    phone: u.phone,
+    email: u.email,
+    role: u.role
+  };
+
+  res.json({
+    user: safe,
+    token: token(safe)
+  });
 });
 
-app.post("/api/courses",auth,(req,res)=>{
-if(req.user.role!=="teacher")return res.status(403).json({error:"Réservé aux enseignants"});
-const {title,subject,level,description="",is_premium=0}=req.body;
-if(!title||!subject||!level)return res.status(400).json({error:"Titre, matière et niveau requis"});
-const r=db.prepare("INSERT INTO courses(title,subject,level,description,is_premium) VALUES(?,?,?,?,?)")
-.run(title,subject,level,description,is_premium?1:0);
-res.status(201).json(db.prepare("SELECT * FROM courses WHERE id=?").get(r.lastInsertRowid));
+/* =========================
+   CURRENT USER
+========================= */
+
+app.get("/api/me", auth, (req, res) => {
+  const user = db
+    .prepare(`
+      SELECT id,name,phone,email,role,created_at
+      FROM users
+      WHERE id=?
+    `)
+    .get(req.user.id);
+
+  res.json(user);
 });
 
-app.get("/api/products",(req,res)=>{
-if(req.query.search){
-const q=%${req.query.search}%;
-return res.json(db.prepare(SELECT p.*,b.name business_name,b.location FROM products p JOIN businesses b ON b.id=p.business_id   WHERE p.name LIKE ? OR p.description LIKE ? ORDER BY p.id DESC).all(q,q));
-}
-res.json(db.prepare(SELECT p.*,b.name business_name,b.location FROM products p   JOIN businesses b ON b.id=p.business_id ORDER BY p.id DESC).all());
+/* =========================
+   COURSES - GET
+========================= */
+
+app.get("/api/courses", (req, res) => {
+  let sql = "SELECT * FROM courses WHERE 1=1";
+  const params = [];
+
+  if (req.query.subject) {
+    sql += " AND subject=?";
+    params.push(req.query.subject);
+  }
+
+  if (req.query.level) {
+    sql += " AND level=?";
+    params.push(req.query.level);
+  }
+
+  sql += " ORDER BY id DESC";
+
+  res.json(
+    db.prepare(sql).all(...params)
+  );
 });
 
-app.post("/api/businesses",auth,(req,res)=>{
-if(req.user.role!=="merchant")return res.status(403).json({error:"Réservé aux commerçants"});
-const {name,description="",location=""}=req.body;
-if(!name)return res.status(400).json({error:"Nom de boutique requis"});
-const r=db.prepare("INSERT INTO businesses(user_id,name,description,location) VALUES(?,?,?,?)")
-.run(req.user.id,name,description,location);
-res.status(201).json(db.prepare("SELECT * FROM businesses WHERE id=?").get(r.lastInsertRowid));
+/* =========================
+   COURSES - CREATE
+========================= */
+
+app.post("/api/courses", auth, (req, res) => {
+  if (req.user.role !== "teacher") {
+    return res.status(403).json({
+      error: "Réservé aux enseignants"
+    });
+  }
+
+  const {
+    title,
+    subject,
+    level,
+    description = "",
+    is_premium = 0
+  } = req.body;
+
+  if (!title || !subject || !level) {
+    return res.status(400).json({
+      error: "Titre, matière et niveau requis"
+    });
+  }
+
+  const r = db
+    .prepare(`
+      INSERT INTO courses(
+        title,
+        subject,
+        level,
+        description,
+        is_premium
+      )
+      VALUES(?,?,?,?,?)
+    `)
+    .run(
+      title,
+      subject,
+      level,
+      description,
+      is_premium ? 1 : 0
+    );
+
+  const course = db
+    .prepare(`
+      SELECT *
+      FROM courses
+      WHERE id=?
+    `)
+    .get(r.lastInsertRowid);
+
+  res.status(201).json(course);
 });
 
-app.post("/api/products",auth,(req,res)=>{
-if(req.user.role!=="merchant")return res.status(403).json({error:"Réservé aux commerçants"});
-const {business_id,name,description="",price,image_url="",stock=0}=req.body;
-const b=db.prepare("SELECT * FROM businesses WHERE id=? AND user_id=?").get(business_id,req.user.id);
-if(!b)return res.status(403).json({error:"Boutique inaccessible"});
-if(!name||!Number.isInteger(price))return res.status(400).json({error:"Nom et prix requis"});
-const r=db.prepare("INSERT INTO products(business_id,name,description,price,image_url,stock) VALUES(?,?,?,?,?,?)")
-.run(business_id,name,description,price,image_url,stock);
-res.status(201).json(db.prepare("SELECT * FROM products WHERE id=?").get(r.lastInsertRowid));
+/* =========================
+   PRODUCTS - GET
+========================= */
+
+app.get("/api/products", (req, res) => {
+  if (req.query.search) {
+    const q = `%${req.query.search}%`;
+
+    const products = db
+      .prepare(`
+        SELECT
+          p.*,
+          b.name AS business_name,
+          b.location
+        FROM products p
+        JOIN businesses b
+          ON b.id=p.business_id
+        WHERE p.name LIKE ?
+           OR p.description LIKE ?
+        ORDER BY p.id DESC
+      `)
+      .all(q, q);
+
+    return res.json(products);
+  }
+
+  const products = db
+    .prepare(`
+      SELECT
+        p.*,
+        b.name AS business_name,
+        b.location
+      FROM products p
+      JOIN businesses b
+        ON b.id=p.business_id
+      ORDER BY p.id DESC
+    `)
+    .all();
+
+  res.json(products);
 });
 
-app.post("/api/subscriptions",auth,(req,res)=>{
-const {plan="premium",amount=1500}=req.body;
-if(!["premium","premium_plus"].includes(plan))return res.status(400).json({error:"Plan invalide"});
-const r=db.prepare(INSERT INTO subscriptions(user_id,plan,status,amount,expires_at)   VALUES(?,?, 'active',?,datetime('now','+30 days'))).run(req.user.id,plan,amount);
-res.status(201).json({success:true,message:"Paiement simulé et abonnement activé",
-subscription:db.prepare("SELECT * FROM subscriptions WHERE id=?").get(r.lastInsertRowid)});
+/* =========================
+   BUSINESS - CREATE
+========================= */
+
+app.post("/api/businesses", auth, (req, res) => {
+  if (req.user.role !== "merchant") {
+    return res.status(403).json({
+      error: "Réservé aux commerçants"
+    });
+  }
+
+  const {
+    name,
+    description = "",
+    location = ""
+  } = req.body;
+
+  if (!name) {
+    return res.status(400).json({
+      error: "Nom de boutique requis"
+    });
+  }
+
+  const r = db
+    .prepare(`
+      INSERT INTO businesses(
+        user_id,
+        name,
+        description,
+        location
+      )
+      VALUES(?,?,?,?)
+    `)
+    .run(
+      req.user.id,
+      name,
+      description,
+      location
+    );
+
+  const business = db
+    .prepare(`
+      SELECT *
+      FROM businesses
+      WHERE id=?
+    `)
+    .get(r.lastInsertRowid);
+
+  res.status(201).json(business);
 });
 
-app.get("/api/subscriptions/me",auth,(req,res)=>res.json(
-db.prepare("SELECT * FROM subscriptions WHERE user_id=? ORDER BY id DESC").all(req.user.id)
-));
+/* =========================
+   PRODUCT - CREATE
+========================= */
 
-app.listen(PORT,()=>console.log(VIMARK API: http://localhost:${PORT}));
+app.post("/api/products", auth, (req, res) => {
+  if (req.user.role !== "merchant") {
+    return res.status(403).json({
+      error: "Réservé aux commerçants"
+    });
+  }
+
+  const {
+    business_id,
+    name,
+    description = "",
+    price,
+    image_url = "",
+    stock = 0
+  } = req.body;
+
+  const business = db
+    .prepare(`
+      SELECT *
+      FROM businesses
+      WHERE id=? AND user_id=?
+    `)
+    .get(
+      business_id,
+      req.user.id
+    );
+
+  if (!business) {
+    return res.status(403).json({
+      error: "Boutique inaccessible"
+    });
+  }
+
+  if (!name || !Number.isInteger(price)) {
+    return res.status(400).json({
+      error: "Nom et prix requis"
+    });
+  }
+
+  const r = db
+    .prepare(`
+      INSERT INTO products(
+        business_id,
+        name,
+        description,
+        price,
+        image_url,
+        stock
+      )
+      VALUES(?,?,?,?,?,?)
+    `)
+    .run(
+      business_id,
+      name,
+      description,
+      price,
+      image_url,
+      stock
+    );
+
+  const product = db
+    .prepare(`
+      SELECT *
+      FROM products
+      WHERE id=?
+    `)
+    .get(r.lastInsertRowid);
+
+  res.status(201).json(product);
+});
+
+/* =========================
+   SUBSCRIPTIONS - CREATE
+========================= */
+
+app.post("/api/subscriptions", auth, (req, res) => {
+  const {
+    plan = "premium",
+    amount = 1500
+  } = req.body;
+
+  if (!["premium", "premium_plus"].includes(plan)) {
+    return res.status(400).json({
+      error: "Plan invalide"
+    });
+  }
+
+  const r = db
+    .prepare(`
+      INSERT INTO subscriptions(
+        user_id,
+        plan,
+        status,
+        amount,
+        expires_at
+      )
+      VALUES(
+        ?,
+        ?,
+        'active',
+        ?,
+        datetime('now','+30 days')
+      )
+    `)
+    .run(
+      req.user.id,
+      plan,
+      amount
+    );
+
+  const subscription = db
+    .prepare(`
+      SELECT *
+      FROM subscriptions
+      WHERE id=?
+    `)
+    .get(r.lastInsertRowid);
+
+  res.status(201).json({
+    success: true,
+    message: "Paiement simulé et abonnement activé",
+    subscription
+  });
+});
+
+/* =========================
+   SUBSCRIPTIONS - CURRENT USER
+========================= */
+
+app.get("/api/subscriptions/me", auth, (req, res) => {
+  const subscriptions = db
+    .prepare(`
+      SELECT *
+      FROM subscriptions
+      WHERE user_id=?
+      ORDER BY id DESC
+    `)
+    .all(req.user.id);
+
+  res.json(subscriptions);
+});
+
+/* =========================
+   START SERVER
+========================= */
+
+app.listen(PORT, () => {
+  console.log(
+    `VIMARK API: http://localhost:${PORT}`
+  );
+});
