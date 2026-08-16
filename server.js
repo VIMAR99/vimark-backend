@@ -8,12 +8,17 @@ const app = express();
 const db = new Database("vimark.db");
 
 const PORT = process.env.PORT || 3000;
-const SECRET = process.env.JWT_SECRET || "CHANGE_ME_IN_PRODUCTION";
+const SECRET =
+  process.env.JWT_SECRET || "CHANGE_ME_IN_PRODUCTION";
 
 app.use(cors());
 app.use(express.json());
 
 db.pragma("journal_mode=WAL");
+
+/* =========================
+   DATABASE
+========================= */
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users(
@@ -66,8 +71,15 @@ CREATE TABLE IF NOT EXISTS subscriptions(
 );
 `);
 
+/* =========================
+   HELPERS
+========================= */
+
 const hash = (password) =>
-  crypto.createHash("sha256").update(password).digest("hex");
+  crypto
+    .createHash("sha256")
+    .update(password)
+    .digest("hex");
 
 const token = (user) =>
   jwt.sign(
@@ -84,6 +96,7 @@ const token = (user) =>
 
 function auth(req, res, next) {
   const header = req.headers.authorization || "";
+
   const t = header.startsWith("Bearer ")
     ? header.slice(7)
     : null;
@@ -104,6 +117,16 @@ function auth(req, res, next) {
   }
 }
 
+function merchantOnly(req, res, next) {
+  if (req.user.role !== "merchant") {
+    return res.status(403).json({
+      error: "Réservé aux commerçants"
+    });
+  }
+
+  next();
+}
+
 /* =========================
    HEALTH
 ========================= */
@@ -112,12 +135,12 @@ app.get("/api/health", (req, res) => {
   res.json({
     ok: true,
     service: "VIMARK API",
-    version: "0.1.0"
+    version: "0.2.0"
   });
 });
 
 /* =========================
-   AUTH - REGISTER
+   REGISTER
 ========================= */
 
 app.post("/api/auth/register", (req, res) => {
@@ -135,7 +158,9 @@ app.post("/api/auth/register", (req, res) => {
     });
   }
 
-  if (!["student", "merchant", "teacher"].includes(role)) {
+  if (
+    !["student", "merchant", "teacher"].includes(role)
+  ) {
     return res.status(400).json({
       error: "Rôle invalide"
     });
@@ -181,7 +206,7 @@ app.post("/api/auth/register", (req, res) => {
 });
 
 /* =========================
-   AUTH - LOGIN
+   LOGIN
 ========================= */
 
 app.post("/api/auth/login", (req, res) => {
@@ -198,7 +223,10 @@ app.post("/api/auth/login", (req, res) => {
     `)
     .get(identifier, identifier);
 
-  if (!u || u.password_hash !== hash(password || "")) {
+  if (
+    !u ||
+    u.password_hash !== hash(password || "")
+  ) {
     return res.status(401).json({
       error: "Identifiants incorrects"
     });
@@ -231,10 +259,17 @@ app.get("/api/me", auth, (req, res) => {
     `)
     .get(req.user.id);
 
+  if (!user) {
+    return res.status(404).json({
+      error: "Utilisateur introuvable"
+    });
+  }
+
   res.json(user);
 });
+
 /* =========================
-   UPDATE CURRENT USER
+   UPDATE PROFILE
 ========================= */
 
 app.put("/api/me", auth, (req, res) => {
@@ -253,14 +288,15 @@ app.put("/api/me", auth, (req, res) => {
   try {
     db.prepare(`
       UPDATE users
-      SET name=?,
-          phone=?,
-          email=?
+      SET
+        name=?,
+        phone=?,
+        email=?
       WHERE id=?
     `).run(
       name.trim(),
-      phone && phone.trim() ? phone.trim() : null,
-      email && email.trim() ? email.trim() : null,
+      phone || null,
+      email || null,
       req.user.id
     );
 
@@ -275,16 +311,19 @@ app.put("/api/me", auth, (req, res) => {
     res.json(user);
   } catch (e) {
     res.status(409).json({
-      error: "Cet e-mail ou ce téléphone est déjà utilisé"
+      error: "Téléphone ou e-mail déjà utilisé"
     });
   }
 });
+
 /* =========================
    COURSES - GET
 ========================= */
 
 app.get("/api/courses", (req, res) => {
-  let sql = "SELECT * FROM courses WHERE 1=1";
+  let sql =
+    "SELECT * FROM courses WHERE 1=1";
+
   const params = [];
 
   if (req.query.subject) {
@@ -308,64 +347,222 @@ app.get("/api/courses", (req, res) => {
    COURSES - CREATE
 ========================= */
 
-app.post("/api/courses", auth, (req, res) => {
-  if (req.user.role !== "teacher") {
-    return res.status(403).json({
-      error: "Réservé aux enseignants"
-    });
-  }
+app.post(
+  "/api/courses",
+  auth,
+  (req, res) => {
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({
+        error: "Réservé aux enseignants"
+      });
+    }
 
-  const {
-    title,
-    subject,
-    level,
-    description = "",
-    is_premium = 0
-  } = req.body;
+    const {
+      title,
+      subject,
+      level,
+      description = "",
+      is_premium = 0
+    } = req.body;
 
-  if (!title || !subject || !level) {
-    return res.status(400).json({
-      error: "Titre, matière et niveau requis"
-    });
-  }
+    if (!title || !subject || !level) {
+      return res.status(400).json({
+        error: "Titre, matière et niveau requis"
+      });
+    }
 
-  const r = db
-    .prepare(`
-      INSERT INTO courses(
+    const r = db
+      .prepare(`
+        INSERT INTO courses(
+          title,
+          subject,
+          level,
+          description,
+          is_premium
+        )
+        VALUES(?,?,?,?,?)
+      `)
+      .run(
         title,
         subject,
         level,
         description,
-        is_premium
-      )
-      VALUES(?,?,?,?,?)
-    `)
-    .run(
-      title,
-      subject,
-      level,
-      description,
-      is_premium ? 1 : 0
-    );
+        is_premium ? 1 : 0
+      );
 
-  const course = db
-    .prepare(`
-      SELECT *
-      FROM courses
-      WHERE id=?
-    `)
-    .get(r.lastInsertRowid);
+    const course = db
+      .prepare(`
+        SELECT *
+        FROM courses
+        WHERE id=?
+      `)
+      .get(r.lastInsertRowid);
 
-  res.status(201).json(course);
-});
+    res.status(201).json(course);
+  }
+);
 
 /* =========================
-   PRODUCTS - GET
+   BUSINESS - CREATE
+========================= */
+
+app.post(
+  "/api/businesses",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const {
+      name,
+      description = "",
+      location = ""
+    } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        error: "Nom de boutique requis"
+      });
+    }
+
+    const existing = db
+      .prepare(`
+        SELECT *
+        FROM businesses
+        WHERE user_id=?
+      `)
+      .get(req.user.id);
+
+    if (existing) {
+      return res.status(409).json({
+        error: "Vous avez déjà une boutique"
+      });
+    }
+
+    const r = db
+      .prepare(`
+        INSERT INTO businesses(
+          user_id,
+          name,
+          description,
+          location
+        )
+        VALUES(?,?,?,?)
+      `)
+      .run(
+        req.user.id,
+        name.trim(),
+        description,
+        location
+      );
+
+    const business = db
+      .prepare(`
+        SELECT *
+        FROM businesses
+        WHERE id=?
+      `)
+      .get(r.lastInsertRowid);
+
+    res.status(201).json(business);
+  }
+);
+
+/* =========================
+   BUSINESS - MY STORE
+========================= */
+
+app.get(
+  "/api/businesses/me",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const business = db
+      .prepare(`
+        SELECT *
+        FROM businesses
+        WHERE user_id=?
+      `)
+      .get(req.user.id);
+
+    if (!business) {
+      return res.status(404).json({
+        error: "Aucune boutique trouvée"
+      });
+    }
+
+    res.json(business);
+  }
+);
+
+/* =========================
+   BUSINESS - UPDATE
+========================= */
+
+app.put(
+  "/api/businesses/me",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const {
+      name,
+      description = "",
+      location = ""
+    } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        error: "Nom de boutique requis"
+      });
+    }
+
+    const business = db
+      .prepare(`
+        SELECT *
+        FROM businesses
+        WHERE user_id=?
+      `)
+      .get(req.user.id);
+
+    if (!business) {
+      return res.status(404).json({
+        error: "Boutique introuvable"
+      });
+    }
+
+    db.prepare(`
+      UPDATE businesses
+      SET
+        name=?,
+        description=?,
+        location=?
+      WHERE id=? AND user_id=?
+    `).run(
+      name.trim(),
+      description,
+      location,
+      business.id,
+      req.user.id
+    );
+
+    const updated = db
+      .prepare(`
+        SELECT *
+        FROM businesses
+        WHERE id=?
+      `)
+      .get(business.id);
+
+    res.json(updated);
+  }
+);
+
+/* =========================
+   PRODUCTS - PUBLIC
 ========================= */
 
 app.get("/api/products", (req, res) => {
   if (req.query.search) {
-    const q = `%${req.query.search}%`;
+    const q =
+      `%${req.query.search}%`;
 
     const products = db
       .prepare(`
@@ -402,201 +599,313 @@ app.get("/api/products", (req, res) => {
 });
 
 /* =========================
-   BUSINESS - CREATE
+   PRODUCTS - MY PRODUCTS
 ========================= */
 
-app.post("/api/businesses", auth, (req, res) => {
-  if (req.user.role !== "merchant") {
-    return res.status(403).json({
-      error: "Réservé aux commerçants"
-    });
+app.get(
+  "/api/products/me",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const products = db
+      .prepare(`
+        SELECT
+          p.*,
+          b.name AS business_name
+        FROM products p
+        JOIN businesses b
+          ON b.id=p.business_id
+        WHERE b.user_id=?
+        ORDER BY p.id DESC
+      `)
+      .all(req.user.id);
+
+    res.json(products);
   }
-
-  const {
-    name,
-    description = "",
-    location = ""
-  } = req.body;
-
-  if (!name) {
-    return res.status(400).json({
-      error: "Nom de boutique requis"
-    });
-  }
-
-  const r = db
-    .prepare(`
-      INSERT INTO businesses(
-        user_id,
-        name,
-        description,
-        location
-      )
-      VALUES(?,?,?,?)
-    `)
-    .run(
-      req.user.id,
-      name,
-      description,
-      location
-    );
-
-  const business = db
-    .prepare(`
-      SELECT *
-      FROM businesses
-      WHERE id=?
-    `)
-    .get(r.lastInsertRowid);
-
-  res.status(201).json(business);
-});
+);
 
 /* =========================
    PRODUCT - CREATE
 ========================= */
 
-app.post("/api/products", auth, (req, res) => {
-  if (req.user.role !== "merchant") {
-    return res.status(403).json({
-      error: "Réservé aux commerçants"
-    });
-  }
-
-  const {
-    business_id,
-    name,
-    description = "",
-    price,
-    image_url = "",
-    stock = 0
-  } = req.body;
-
-  const business = db
-    .prepare(`
-      SELECT *
-      FROM businesses
-      WHERE id=? AND user_id=?
-    `)
-    .get(
+app.post(
+  "/api/products",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const {
       business_id,
-      req.user.id
-    );
+      name,
+      description = "",
+      price,
+      image_url = "",
+      stock = 0
+    } = req.body;
 
-  if (!business) {
-    return res.status(403).json({
-      error: "Boutique inaccessible"
-    });
-  }
-
-  if (!name || !Number.isInteger(price)) {
-    return res.status(400).json({
-      error: "Nom et prix requis"
-    });
-  }
-
-  const r = db
-    .prepare(`
-      INSERT INTO products(
+    const business = db
+      .prepare(`
+        SELECT *
+        FROM businesses
+        WHERE id=? AND user_id=?
+      `)
+      .get(
         business_id,
-        name,
+        req.user.id
+      );
+
+    if (!business) {
+      return res.status(403).json({
+        error: "Boutique inaccessible"
+      });
+    }
+
+    if (
+      !name ||
+      !Number.isInteger(price)
+    ) {
+      return res.status(400).json({
+        error: "Nom et prix requis"
+      });
+    }
+
+    const r = db
+      .prepare(`
+        INSERT INTO products(
+          business_id,
+          name,
+          description,
+          price,
+          image_url,
+          stock
+        )
+        VALUES(?,?,?,?,?,?)
+      `)
+      .run(
+        business_id,
+        name.trim(),
         description,
         price,
         image_url,
         stock
-      )
-      VALUES(?,?,?,?,?,?)
-    `)
-    .run(
-      business_id,
-      name,
+      );
+
+    const product = db
+      .prepare(`
+        SELECT *
+        FROM products
+        WHERE id=?
+      `)
+      .get(r.lastInsertRowid);
+
+    res.status(201).json(product);
+  }
+);
+
+/* =========================
+   PRODUCT - UPDATE
+========================= */
+
+app.put(
+  "/api/products/:id",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const productId =
+      Number(req.params.id);
+
+    const product = db
+      .prepare(`
+        SELECT p.*
+        FROM products p
+        JOIN businesses b
+          ON b.id=p.business_id
+        WHERE p.id=?
+          AND b.user_id=?
+      `)
+      .get(
+        productId,
+        req.user.id
+      );
+
+    if (!product) {
+      return res.status(404).json({
+        error: "Produit introuvable"
+      });
+    }
+
+    const {
+      name = product.name,
+      description = product.description,
+      price = product.price,
+      image_url = product.image_url,
+      stock = product.stock
+    } = req.body;
+
+    if (
+      !name ||
+      !Number.isInteger(price)
+    ) {
+      return res.status(400).json({
+        error: "Nom et prix requis"
+      });
+    }
+
+    db.prepare(`
+      UPDATE products
+      SET
+        name=?,
+        description=?,
+        price=?,
+        image_url=?,
+        stock=?
+      WHERE id=?
+    `).run(
+      name.trim(),
       description,
       price,
       image_url,
-      stock
+      stock,
+      productId
     );
 
-  const product = db
-    .prepare(`
-      SELECT *
-      FROM products
-      WHERE id=?
-    `)
-    .get(r.lastInsertRowid);
+    const updated = db
+      .prepare(`
+        SELECT *
+        FROM products
+        WHERE id=?
+      `)
+      .get(productId);
 
-  res.status(201).json(product);
-});
+    res.json(updated);
+  }
+);
+
+/* =========================
+   PRODUCT - DELETE
+========================= */
+
+app.delete(
+  "/api/products/:id",
+  auth,
+  merchantOnly,
+  (req, res) => {
+    const productId =
+      Number(req.params.id);
+
+    const product = db
+      .prepare(`
+        SELECT p.id
+        FROM products p
+        JOIN businesses b
+          ON b.id=p.business_id
+        WHERE p.id=?
+          AND b.user_id=?
+      `)
+      .get(
+        productId,
+        req.user.id
+      );
+
+    if (!product) {
+      return res.status(404).json({
+        error: "Produit introuvable"
+      });
+    }
+
+    db.prepare(`
+      DELETE FROM products
+      WHERE id=?
+    `).run(productId);
+
+    res.json({
+      success: true,
+      message: "Produit supprimé"
+    });
+  }
+);
 
 /* =========================
    SUBSCRIPTIONS - CREATE
 ========================= */
 
-app.post("/api/subscriptions", auth, (req, res) => {
-  const {
-    plan = "premium",
-    amount = 1500
-  } = req.body;
+app.post(
+  "/api/subscriptions",
+  auth,
+  (req, res) => {
+    const {
+      plan = "premium",
+      amount = 1500
+    } = req.body;
 
-  if (!["premium", "premium_plus"].includes(plan)) {
-    return res.status(400).json({
-      error: "Plan invalide"
+    if (
+      !["premium", "premium_plus"]
+        .includes(plan)
+    ) {
+      return res.status(400).json({
+        error: "Plan invalide"
+      });
+    }
+
+    const r = db
+      .prepare(`
+        INSERT INTO subscriptions(
+          user_id,
+          plan,
+          status,
+          amount,
+          expires_at
+        )
+        VALUES(
+          ?,
+          ?,
+          'active',
+          ?,
+          datetime('now','+30 days')
+        )
+      `)
+      .run(
+        req.user.id,
+        plan,
+        amount
+      );
+
+    const subscription = db
+      .prepare(`
+        SELECT *
+        FROM subscriptions
+        WHERE id=?
+      `)
+      .get(r.lastInsertRowid);
+
+    res.status(201).json({
+      success: true,
+      message:
+        "Paiement simulé et abonnement activé",
+      subscription
     });
   }
-
-  const r = db
-    .prepare(`
-      INSERT INTO subscriptions(
-        user_id,
-        plan,
-        status,
-        amount,
-        expires_at
-      )
-      VALUES(
-        ?,
-        ?,
-        'active',
-        ?,
-        datetime('now','+30 days')
-      )
-    `)
-    .run(
-      req.user.id,
-      plan,
-      amount
-    );
-
-  const subscription = db
-    .prepare(`
-      SELECT *
-      FROM subscriptions
-      WHERE id=?
-    `)
-    .get(r.lastInsertRowid);
-
-  res.status(201).json({
-    success: true,
-    message: "Paiement simulé et abonnement activé",
-    subscription
-  });
-});
+);
 
 /* =========================
-   SUBSCRIPTIONS - CURRENT USER
+   SUBSCRIPTIONS - ME
 ========================= */
 
-app.get("/api/subscriptions/me", auth, (req, res) => {
-  const subscriptions = db
-    .prepare(`
-      SELECT *
-      FROM subscriptions
-      WHERE user_id=?
-      ORDER BY id DESC
-    `)
-    .all(req.user.id);
+app.get(
+  "/api/subscriptions/me",
+  auth,
+  (req, res) => {
+    const subscriptions = db
+      .prepare(`
+        SELECT *
+        FROM subscriptions
+        WHERE user_id=?
+        ORDER BY id DESC
+      `)
+      .all(req.user.id);
 
-  res.json(subscriptions);
-});
+    res.json(subscriptions);
+  }
+);
 
 /* =========================
    START SERVER
@@ -604,6 +913,6 @@ app.get("/api/subscriptions/me", auth, (req, res) => {
 
 app.listen(PORT, () => {
   console.log(
-    `VIMARK API: http://localhost:${PORT}`
+    `VIMARK API running on port ${PORT}`
   );
 });
