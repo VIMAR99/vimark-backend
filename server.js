@@ -233,7 +233,52 @@ app.get("/api/me", auth, (req, res) => {
 
   res.json(user);
 });
+/* =========================
+   UPDATE CURRENT USER
+========================= */
 
+app.put("/api/me", auth, (req, res) => {
+  const {
+    name,
+    phone,
+    email
+  } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({
+      error: "Le nom est requis"
+    });
+  }
+
+  try {
+    db.prepare(`
+      UPDATE users
+      SET name=?,
+          phone=?,
+          email=?
+      WHERE id=?
+    `).run(
+      name.trim(),
+      phone && phone.trim() ? phone.trim() : null,
+      email && email.trim() ? email.trim() : null,
+      req.user.id
+    );
+
+    const user = db
+      .prepare(`
+        SELECT id,name,phone,email,role,created_at
+        FROM users
+        WHERE id=?
+      `)
+      .get(req.user.id);
+
+    res.json(user);
+  } catch (e) {
+    res.status(409).json({
+      error: "Cet e-mail ou ce téléphone est déjà utilisé"
+    });
+  }
+});
 /* =========================
    COURSES - GET
 ========================= */
