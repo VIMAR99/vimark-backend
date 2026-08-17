@@ -872,12 +872,16 @@ app.post(
       } = req.body;
 
       const transaction = await Transaction.create({
-        description,
-        amount,
-        currency: {
-          iso: "XOF"
-        }
-      });
+  description,
+  amount,
+  currency: {
+    iso: "XOF"
+  },
+  custom_metadata: {
+    user_id: String(req.user.id),
+    plan: "premium"
+  }
+});
 
       const paymentToken =
         await transaction.generateToken();
