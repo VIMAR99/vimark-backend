@@ -947,6 +947,7 @@ app.post(
         });
       }
 
+      // Vérification directe auprès de FedaPay
       const transaction =
         await Transaction.retrieve(
           transactionId
@@ -957,11 +958,106 @@ app.post(
         transaction
       );
 
+      // Paiement confirmé
       if (
         transaction.status === "approved"
       ) {
         console.log(
           "Paiement FedaPay confirmé ✅"
+        );
+
+        const metadata =
+          transaction.custom_metadata || {};
+
+        const userId =
+          Number(metadata.user_id);
+
+        const plan =
+          metadata.plan || "premium";
+
+        const amount =
+          Number(transaction.amount);
+
+        if (!userId) {
+          console.log(
+            "user_id absent des métadonnées"
+          );
+
+          return res.status(200).json({
+            received: true
+          });
+        }
+
+        // Vérifier que l'utilisateur existe
+        const user = db
+          .prepare(`
+            SELECT id
+            FROM users
+            WHERE id=?
+          `)
+          .get(userId);
+
+        if (!user) {
+          console.log(
+            "Utilisateur introuvable :",
+            userId
+          );
+
+          return res.status(200).json({
+            received: true
+          });
+        }
+
+        // Éviter de créer plusieurs abonnements
+        // pour la même transaction
+        const existing = db
+          .prepare(`
+            SELECT id
+            FROM subscriptions
+            WHERE user_id=?
+              AND status='active'
+            ORDER BY id DESC
+            LIMIT 1
+          `)
+          .get(userId);
+
+        if (existing) {
+          console.log(
+            "Abonnement déjà actif pour cet utilisateur"
+          );
+
+          return res.status(200).json({
+            received: true
+          });
+        }
+
+        // Créer l'abonnement Premium
+        const result = db
+          .prepare(`
+            INSERT INTO subscriptions(
+              user_id,
+              plan,
+              status,
+              amount,
+              expires_at
+            )
+            VALUES(
+              ?,
+              ?,
+              'active',
+              ?,
+              datetime('now','+30 days')
+            )
+          `)
+          .run(
+            userId,
+            plan,
+            amount
+          );
+
+        console.log(
+          "Abonnement Premium activé ✅",
+          result.lastInsertRowid
         );
       }
 
