@@ -3,6 +3,7 @@ const cors = require("cors");
 const Database = require("better-sqlite3");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const { FedaPay, Transaction } = require("fedapay");
 
 const app = express();
 const db = new Database("vimark.db");
