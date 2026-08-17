@@ -917,6 +917,71 @@ app.post(
   }
 );
 /* =========================
+   FEDAPAY - WEBHOOK
+========================= */
+
+app.post(
+  "/api/webhooks/fedapay",
+  async (req, res) => {
+    try {
+      const event = JSON.parse(
+        req.body.toString()
+      );
+
+      console.log(
+        "FedaPay webhook reçu :",
+        JSON.stringify(event, null, 2)
+      );
+
+      const transactionId =
+        event?.data?.object?.id ||
+        event?.data?.id;
+
+      if (!transactionId) {
+        console.log(
+          "Aucun ID de transaction trouvé"
+        );
+
+        return res.status(200).json({
+          received: true
+        });
+      }
+
+      const transaction =
+        await Transaction.retrieve(
+          transactionId
+        );
+
+      console.log(
+        "Transaction FedaPay vérifiée :",
+        transaction
+      );
+
+      if (
+        transaction.status === "approved"
+      ) {
+        console.log(
+          "Paiement FedaPay confirmé ✅"
+        );
+      }
+
+      res.status(200).json({
+        received: true
+      });
+
+    } catch (error) {
+      console.error(
+        "Erreur webhook FedaPay :",
+        error
+      );
+
+      res.status(400).json({
+        error: "Webhook invalide"
+      });
+    }
+  }
+);
+/* =========================
    SUBSCRIPTIONS - CREATE
 ========================= */
 
