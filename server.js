@@ -5,8 +5,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const {
   FedaPay,
-  Transaction,
-  Webhook
+  Transaction
 } = require("fedapay");
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
 FedaPay.setEnvironment("sandbox");
