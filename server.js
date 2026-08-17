@@ -5,6 +5,8 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const { FedaPay, Transaction } = require("fedapay");
 
+FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
+FedaPay.setEnvironment("sandbox");
 const app = express();
 const db = new Database("vimark.db");
 
