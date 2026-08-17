@@ -848,14 +848,15 @@ app.post(
         }
       });
 
-      const token =
+      const paymentToken =
         await transaction.generateToken();
 
       res.status(201).json({
-        success: true,
-        token,
-        transaction
-      });
+  success: true,
+  token: paymentToken.token,
+  url: paymentToken.url,
+  transaction
+});
 
     } catch (error) {
       console.error(
