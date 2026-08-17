@@ -1085,56 +1085,9 @@ app.post(
   "/api/subscriptions",
   auth,
   (req, res) => {
-    const {
-      plan = "premium",
-      amount = 1500
-    } = req.body;
-
-    if (
-      !["premium", "premium_plus"]
-        .includes(plan)
-    ) {
-      return res.status(400).json({
-        error: "Plan invalide"
-      });
-    }
-
-    const r = db
-      .prepare(`
-        INSERT INTO subscriptions(
-          user_id,
-          plan,
-          status,
-          amount,
-          expires_at
-        )
-        VALUES(
-          ?,
-          ?,
-          'active',
-          ?,
-          datetime('now','+30 days')
-        )
-      `)
-      .run(
-        req.user.id,
-        plan,
-        amount
-      );
-
-    const subscription = db
-      .prepare(`
-        SELECT *
-        FROM subscriptions
-        WHERE id=?
-      `)
-      .get(r.lastInsertRowid);
-
-    res.status(201).json({
-      success: true,
-      message:
-        "Paiement simulé et abonnement activé",
-      subscription
+    return res.status(403).json({
+      error:
+        "L'abonnement doit être activé après un paiement FedaPay confirmé"
     });
   }
 );
