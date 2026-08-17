@@ -826,7 +826,50 @@ app.delete(
     });
   }
 );
+/* =========================
+   FEDAPAY - CREATE PAYMENT
+========================= */
 
+app.post(
+  "/api/payments/fedapay",
+  auth,
+  async (req, res) => {
+    try {
+      const {
+        amount = 1500,
+        description = "VIMARK Premium"
+      } = req.body;
+
+      const transaction = await Transaction.create({
+        description,
+        amount,
+        currency: {
+          iso: "XOF"
+        }
+      });
+
+      const token =
+        await transaction.generateToken();
+
+      res.status(201).json({
+        success: true,
+        token,
+        transaction
+      });
+
+    } catch (error) {
+      console.error(
+        "FedaPay error:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Impossible de créer la transaction FedaPay"
+      });
+    }
+  }
+);
 /* =========================
    SUBSCRIPTIONS - CREATE
 ========================= */
