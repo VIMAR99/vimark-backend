@@ -3,8 +3,11 @@ const cors = require("cors");
 const Database = require("better-sqlite3");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
-const { FedaPay, Transaction } = require("fedapay");
-
+const {
+  FedaPay,
+  Transaction,
+  Webhook
+} = require("fedapay");
 FedaPay.setApiKey(process.env.FEDAPAY_SECRET_KEY);
 FedaPay.setEnvironment("sandbox");
 const app = express();
@@ -15,6 +18,14 @@ const SECRET =
   process.env.JWT_SECRET || "CHANGE_ME_IN_PRODUCTION";
 
 app.use(cors());
+
+app.use(
+  "/api/webhooks/fedapay",
+  express.raw({
+    type: "application/json"
+  })
+);
+
 app.use(express.json());
 
 db.pragma("journal_mode=WAL");
