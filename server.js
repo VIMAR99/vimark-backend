@@ -141,7 +141,38 @@ app.get("/api/health", (req, res) => {
     version: "0.2.0"
   });
 });
+// =========================
+// VERIFY FEDAPAY PAYMENT
+// =========================
 
+app.get(
+  "/api/payments/fedapay/:id",
+  auth,
+  async (req, res) => {
+    try {
+      const transaction =
+        await Transaction.retrieve(
+          req.params.id
+        );
+
+      res.json({
+        success: true,
+        transaction
+      });
+
+    } catch (error) {
+      console.error(
+        "FedaPay verification error:",
+        error
+      );
+
+      res.status(500).json({
+        error:
+          "Impossible de vérifier la transaction FedaPay"
+      });
+    }
+  }
+);
 /* =========================
    REGISTER
 ========================= */
